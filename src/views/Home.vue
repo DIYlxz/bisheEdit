@@ -8,7 +8,7 @@
         <div class="ev_sbox_btn">
           <div class="ev_selectVideo_btn">
             <div class="ev_sv_title">视频选择</div>
-            <input type="file" class="ev_file_select" @change="test" />
+            <input type="file" class="ev_file_select" @change="test" multiple />
           </div>
           <div class="ev_selectMusic_btn">
             <div class="ev_sm_title">音频选择</div>
@@ -16,13 +16,18 @@
           </div>
         </div>
         <div>
-          <div>已选择视频：
+          <div>
+            已选择视频：
             <span v-show="!file">暂无视频</span>
-            <span v-show="file">{{fileName}}</span>
+            <span v-show="file"
+              >{{ fileName }}
+              <span v-show="otherFile">{{ "和" + otherFileName }}</span>
+            </span>
           </div>
-          <div>已选择音频：
+          <div>
+            已选择音频：
             <span v-show="!muiscFile">暂无音频</span>
-            <span v-show="muiscFile">{{muiscFileName}}</span>
+            <span v-show="muiscFile">{{ muiscFileName }}</span>
           </div>
         </div>
         <div class="ev_sbox_progress">
@@ -44,6 +49,11 @@
           <div>转化视频格式</div>
           <div>avi->mp4</div>
         </div>
+        <div class="ev_select_part" @click="mergeVideo">
+          <div>合并视频</div>
+          <div>mp4</div>
+          <div v-show="mergeVideoPro != '开始'">进度：{{ mergeVideoPro }}</div>
+        </div>
         <div class="ev_select_part" @click="allVideoMuisc">
           <div>音频接入</div>
           <div>音频和视频并入</div>
@@ -55,6 +65,11 @@
       <div v-show="changedVideo">
         <a class="downVideo">下载修改的视频</a>
       </div>
+    </div>
+    <div v-if="videoHref">
+      <video class="ev_video" controls ref="myVideo" crossorigin>
+        <source :src="videoHref" type="video/mp4" />
+      </video>
     </div>
   </div>
 </template>
@@ -77,12 +92,81 @@ export default {
       percent: 0,
       //不允许多次触发
       funcUse: false,
+      //mp4的链接
+      videoHref: "",
+      //第二个视频名称
+      otherFileName: "",
+      otherFile: null,
+      //合并视频进度
+      mergeVideoPro: "开始",
+      //音频合并进度
+      musicVideoPro: "开始",
     };
   },
   methods: {
-    //回到视频主页
-    quitHome() {
-      this.$router.push("/home");
+    //合并视频
+    mergeVideo() {
+      if (this.file && this.otherFile) {
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg();
+        let url = null;
+        (async () => {
+          let { name } = this.file;
+          // ffmpeg.setProgress(({ ratio }) => {
+          //   this.percent = Math.floor(ratio * 100);
+          //   console.log(ratio);
+          // });
+          await ffmpeg.load();
+          this.mergeVideoPro = "初始化";
+          ffmpeg.FS("writeFile", name, await fetchFile(this.file));
+          ffmpeg.FS(
+            "writeFile",
+            this.otherFileName,
+            await fetchFile(this.otherFile)
+          );
+          await ffmpeg.run("-i", name, "-qscale", "4", "out1.mpg");
+          this.mergeVideoPro = "第一个视频转化";
+          await ffmpeg.run(
+            "-i",
+            this.otherFileName,
+            "-qscale",
+            "4",
+            "out2.mpg"
+          );
+          this.mergeVideoPro = "第二个视频转化";
+          await ffmpeg.run(
+            "-i",
+            "concat:out1.mpg|out2.mpg",
+            "-c",
+            "copy",
+            "output.mpg"
+          );
+          this.mergeVideoPro = "开始合并";
+          await ffmpeg.run(
+            "-i",
+            "output.mpg",
+            "-y",
+            "-qscale",
+            "0",
+            "-vcodec",
+            "libx264",
+            "output.mp4"
+          );
+          this.mergeVideoPro = "完成";
+          const data = ffmpeg.FS("readFile", "output.mp4");
+          url = URL.createObjectURL(
+            new Blob([data.buffer], { type: "video/mp4" })
+          );
+          this.videoHref = url;
+          this.changedVideo = true;
+          setTimeout(() => {
+            this.percent = 0;
+            this.mergeVideoPro = "开始";
+          }, 1000);
+        })();
+      } else {
+        this.$message.error("请选择两个视频");
+      }
     },
     //音频选择
     muiscTest(e) {
@@ -111,11 +195,11 @@ export default {
         (async () => {
           let { name } = this.file;
           let musicName = this.muiscFile.name;
-          ffmpeg.setProgress(({ ratio }) => {
-            this.percent = Math.floor(ratio * 100);
-          });
+          // ffmpeg.setProgress(({ ratio }) => {
+          //   this.percent = Math.floor(ratio * 100);
+          //   console.log(ratio);
+          // });
           await ffmpeg.load();
-          console.log(ffmpeg.FS);
           ffmpeg.FS("writeFile", name, await fetchFile(this.file));
           ffmpeg.FS("writeFile", musicName, await fetchFile(this.muiscFile));
           await ffmpeg.run("-i", name, "-i", musicName, "dzzdzz.avi");
@@ -123,11 +207,12 @@ export default {
           url = URL.createObjectURL(
             new Blob([data.buffer], { type: "video/avi" })
           );
-          console.log(url);
           let down = document.querySelector(".downVideo");
           down.href = url;
           this.changedVideo = true;
-          this.percent = 0;
+          setTimeout(() => {
+            this.percent = 0;
+          }, 1000);
         })();
       } else {
         this.$message.error("请先选择视频和音频");
@@ -136,6 +221,7 @@ export default {
     //改变视频格式
     changeVideoFormat() {
       if (this.file) {
+        this.videoHref = "";
         const { createFFmpeg, fetchFile } = FFmpeg;
         const ffmpeg = createFFmpeg();
         let url = null;
@@ -151,11 +237,11 @@ export default {
           url = URL.createObjectURL(
             new Blob([data.buffer], { type: "video/mp4" })
           );
-          console.log(url);
-          let down = document.querySelector(".downVideo");
-          down.href = url;
+          this.videoHref = url;
           this.changedVideo = true;
-          this.percent = 0;
+          setTimeout(() => {
+            this.percent = 0;
+          }, 1000);
         })();
       } else {
         this.$message.error("请先选择视频");
@@ -164,6 +250,7 @@ export default {
     //获取音频
     getVideoMuisc() {
       if (this.file) {
+        this.videoHref = "";
         const { createFFmpeg, fetchFile } = FFmpeg;
         const ffmpeg = createFFmpeg();
         let url = null;
@@ -179,7 +266,6 @@ export default {
           url = URL.createObjectURL(
             new Blob([data.buffer], { type: "video/avi" })
           );
-          console.log(url);
           let down = document.querySelector(".downVideo");
           down.href = url;
           this.changedVideo = true;
@@ -192,6 +278,7 @@ export default {
     //转换视频点击
     changedVideoBtn() {
       if (this.file && !this.funcUse) {
+        this.videoHref = "";
         this.funcUse = true;
         const { createFFmpeg, fetchFile } = FFmpeg;
         const ffmpeg = createFFmpeg();
@@ -208,14 +295,13 @@ export default {
           url = URL.createObjectURL(
             new Blob([data.buffer], { type: "video/avi" })
           );
-          console.log(url);
           let down = document.querySelector(".downVideo");
           down.href = url;
           this.changedVideo = true;
-          setTimeout(()=>{
+          setTimeout(() => {
             this.percent = 0;
             this.funcUse = false;
-          },1000)
+          }, 1000);
         })();
       } else {
         this.$message.error("请先选择视频或者等待当前处理完毕");
@@ -223,21 +309,45 @@ export default {
     },
     //选择视频
     test(e) {
-      let name = e.target.files[0].name;
-      let myType = ["mp4", "avi"];
-      let len = myType.length;
-      for (let i = 0; i < len; i++) {
-        if (name.indexOf(myType[i]) != -1) {
-          this.$message({
-            type: "success",
-            message: "视频选择成功",
-          });
-          this.file = e.target.files[0];
-          this.fileName = e.target.files[0].name;
-          return;
+      let len = e.target.files.length;
+      if (len == 1) {
+        let name = e.target.files[0].name;
+        let myType = ["mp4", "avi"];
+        let len = myType.length;
+        for (let i = 0; i < len; i++) {
+          if (name.indexOf(myType[i]) != -1) {
+            this.$message({
+              type: "success",
+              message: "视频选择成功",
+            });
+            this.file = e.target.files[0];
+            this.fileName = e.target.files[0].name;
+            return;
+          }
         }
+        this.$message.error("请选择mp4,avi格式的视频");
+      } else if (len == 2) {
+        let name1 = e.target.files[0].name;
+        let name2 = e.target.files[1].name;
+        let myType = ["mp4", "avi"];
+        let len = myType.length;
+        for (let i = 0; i < len; i++) {
+          if (name1.indexOf(myType[i]) != -1 && name2.indexOf(myType[i])) {
+            this.$message({
+              type: "success",
+              message: "视频选择成功",
+            });
+            this.file = e.target.files[0];
+            this.fileName = e.target.files[0].name;
+            this.otherFileName = e.target.files[1].name;
+            this.otherFile = e.target.files[1];
+            return;
+          }
+        }
+        this.$message.error("请选择mp4,avi格式的视频");
+      } else {
+        this.$message.error("请选择2个及以下视频");
       }
-      this.$message.error("请选择mp4,avi格式的视频");
     },
   },
 };
@@ -328,6 +438,10 @@ export default {
     height: 4rem;
     background-color: #d8d8d8;
     margin: 2rem auto;
+  }
+  .ev_video {
+    width: 20rem;
+    height: 10rem;
   }
 }
 </style>

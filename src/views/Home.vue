@@ -375,6 +375,7 @@ export default {
     .ev_select_video {
       .ev_sbox_btn {
         display: flex;
+        flex-wrap: wrap;
         .ev_selectVideo_btn {
           width: 10rem;
           padding: 0.5rem 1rem 0.5rem 1rem;
